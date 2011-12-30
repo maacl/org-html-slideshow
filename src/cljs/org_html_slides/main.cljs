@@ -15,17 +15,38 @@
 (defn info [msg]
   (.info logger msg))
 
-(def current-slide (atom 0))
-
 (def slideshow-mode (atom false))
 
-(def loaded-slides (atom []))
+;;; body
 
-(defn body-elem []
+(defn get-body []
   (first (array/toArray (dom/getElementsByTagNameAndClass "body"))))
 
-(def original-body-html
-  (. (body-elem) innerHTML))
+(defn set-body [elem]
+  (let [body (first (array/toArray (dom/getElementsByTagNameAndClass "body")))
+        parent (. body parentNode)]
+    (.removeChild parent body)
+    (.appendChild parent (.cloneNode elem true))))
+
+(def document-body (.cloneNode (get-body) true))
+
+;;; location fragment
+
+(defn location-fragment []
+  (let [uri (Uri/parse (. js/window location))]
+    (when (. uri (hasFragment))
+      (. uri (getFragment)))))
+
+(defn set-location-fragment [id]
+  (set! (. js/window location)
+        (. (Uri/parse (. js/window location)) (setFragment id))))
+
+(defn current-element []
+  (if-let [id (location-fragment)]
+    (dom/getElement id document-body)
+    (. (dom/getDocument) firstChild)))
+
+;;; stylesheets
 
 (defn stylesheet-link-elems [media-type]
   (vec (filter (fn [elem]
@@ -64,24 +85,17 @@
 
 (defn first-slide-marker-after [elem]
   (first (filter (fn [elem]
+                    (info (str "Checking element " elem))
                    (and (= "SPAN" (. elem nodeName))
                         (classes/has elem "slide")))
                  (node-seq elem))))
 
-(defn replace-body [elem]
-  (let [body (body-elem)]
-    (set! (. body innerHTML) "")
-    (.appendChild body elem)))
-
-(defn show-current-slide []
-  (let [slide (@loaded-slides @current-slide)]
-    (replace-body slide)
-    (let [uri (Uri/parse (. js/window location))]
-      (. uri (setFragment (. slide id)))
-      (set! (. js/window location) (str uri)))))
-
-(defn show-original-html []
-  (set! (. (body-elem) innerHTML) original-body-html))
+(defn second-slide-marker-after [elem]
+  (second (filter (fn [elem]
+                    (info (str "Checking element " elem))
+                   (and (= "SPAN" (. elem nodeName))
+                        (classes/has elem "slide")))
+                 (node-seq elem))))
 
 (defn add-to-head [elem]
   (.appendChild (first (array/toArray (dom/getElementsByTagNameAndClass "head")))
@@ -90,21 +104,22 @@
 (defn remove-elem [elem]
   (.. elem parentNode (removeChild elem)))
 
-(defn set-current-slide-by-uri-fragment []
-  (let [uri (Uri/parse (. js/window location))]
-    (when (. uri (hasFragment))
-      (let [frag (. uri (getFragment))]
-        (info (str "Fragment ID found: " frag))
-        (when-let [marker (first-slide-marker-after (dom/getElement frag))]
-          (let [slide-id (. (containing-slide-div marker) id)
-                i (some identity (map-indexed (fn [i x] (when (= slide-id (. x id)) i)) @loaded-slides))]
-            (info (str "Next slide ID found: " slide-id))
-            (info (str "Corresponding slide number: " i))
-            (reset! current-slide i)))))))
+;;; show
+
+(defn show-original-html []
+  (set-body document-body))
+
+(defn show-current-slide []
+  (info "Showing slide")
+  (let [slide (containing-slide-div (first-slide-marker-after (current-element)))]
+    (info (str "Next slide found: " slide))
+    (set-body (dom/createDom "body" nil slide))
+    (set-location-fragment (. slide id))))
+
+;;; slideshow mode
 
 (defn enter-slideshow-mode []
   (info "Entering slideshow mode")
-  (set-current-slide-by-uri-fragment)
   (show-current-slide)
   (doseq [elem (stylesheet-link-elems "screen")]
     (remove-elem elem))
@@ -119,15 +134,11 @@
     (remove-elem elem))
   (doseq [elem original-screen-stylesheet-links]
     (add-to-head elem))
-  (let [frag (. (Uri/parse (. js/window location)) (getFragment))]
-    ;; Can't make goog.style.scrollIntoContainerView work,
-    ;; don't know what the 'container' arg is supposed to be.
-    (. (dom/getElement frag) (scrollIntoView))))
+  (. (current-element) (scrollIntoView)))
 
 (defn show-next-slide []
-  (when (< @current-slide (dec (count @loaded-slides)))
-    (swap! current-slide inc)
-    (show-current-slide)))
+  (set-location-fragment (. (containing-slide-div (second-slide-marker-after (current-element))) id))
+  (show-current-slide))
 
 (defn show-prev-slide []
   (when (pos? @current-slide)
@@ -177,12 +188,9 @@
 (defn main []
   (.setCapturing (goog.debug.Console.) true)
   (info "Application started")
-  (add-image-classes)  ;; doesn't work because we rewrite the DOM
-  (reset! loaded-slides (all-slides))
-  (info (str "Loaded " (count @loaded-slides) " slides"))
   (info (str "Found " (count original-screen-stylesheet-links) " screen stylesheets."))
   (info (str "Found " (count original-projection-stylesheet-links) " projection stylesheets."))
-  (install-keyhandler)
-  (info (str "Slide after #sec-2-2: "  (first-slide-marker-after (dom/getElement "sec-2-2")))))
+  (add-image-classes)
+  (install-keyhandler))
 
 (main)
