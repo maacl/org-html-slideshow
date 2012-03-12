@@ -15,7 +15,8 @@
             [goog.Uri :as Uri]
             [goog.window :as window]
             [one.dispatch :as dispatch]
-            [domina :as d]))
+            [domina :as d]
+            [domina.xpath :as xp]))
 
 ;;; GLOBAL STATE
 
@@ -52,6 +53,17 @@
   "Remove a node from the DOM tree."
   [elem]
   (.. elem -parentNode (removeChild elem)))
+
+(defn remove-nbsp [h]
+  (d/detach! (xp/xpath h "//span"))        
+  (let [txt (d/text h)]
+    (d/set-text! h (clojure.string/replace txt \u00A0 \u0020))))
+
+(defn remove-nbsp-from-headings []
+  (let [heading-levels ["//h1" "//h2" "//h3" "//h4" "//h5" "//h6"]]
+      (doseq [lvl heading-levels]
+       (doseq [heading (d/nodes (xp/xpath lvl))]
+       (remove-nbsp heading)))))
 
 (defn add-to-head
   ([elem] (add-to-head elem nil))
@@ -546,12 +558,14 @@
   (init-stylesheets)
   (remove-stylesheets (get @stylesheet-urls "projection"))
   (remove-stylesheets (get @stylesheet-urls "presenter"))
+  
   (add-image-classes)
   (copy-heading-tags-to-div-classes)
   (add-outline-text-class)
   (install-folds)
+  (remove-nbsp-from-headings)
   (. (body-elem)
-     (appendChild (dom/htmlToDocumentFragment current-slide-div-html)))
+  (appendChild (dom/htmlToDocumentFragment current-slide-div-html)))
   (hide! (d/by-id "current-slide"))
   (reset! slides (get-slides))
   (info '(count slides) (count @slides))
